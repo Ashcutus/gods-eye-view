@@ -48,6 +48,39 @@ jobs:
       - name: Check package boundaries
         run: npm run check:boundaries
 
+      - name: Check Omarchy packaging
+        run: npm run omarchy:check
+
+      - name: Smoke-test Omarchy install lifecycle
+        if: matrix.node == '24.14.0'
+        run: |
+          test_root="$(mktemp -d)"
+          trap 'rm -rf -- "$test_root"' EXIT
+          test_home="$test_root/home"
+          test_data="$test_root/data"
+          test_state="$test_root/state"
+          test_install="$test_root/install/gods-eye-view"
+
+          HOME="$test_home" \
+            XDG_DATA_HOME="$test_data" \
+            XDG_STATE_HOME="$test_state" \
+            GEV_INSTALL_ROOT="$test_install" \
+            npm run omarchy:install
+
+          test -x "$test_home/.local/bin/gods-eye-view-launch"
+          test -f "$test_data/applications/com.bilawal.GodsEyeView.desktop"
+          test -f "$test_data/icons/hicolor/scalable/apps/com.bilawal.GodsEyeView.svg"
+          test ! -e "$test_install/.env"
+
+          HOME="$test_home" \
+            XDG_DATA_HOME="$test_data" \
+            XDG_STATE_HOME="$test_state" \
+            GEV_INSTALL_ROOT="$test_install" \
+            npm run omarchy:uninstall
+
+          test ! -e "$test_install"
+          test ! -e "$test_home/.local/bin/gods-eye-view-launch"
+
       - name: Run unit tests
         run: npm test
 
