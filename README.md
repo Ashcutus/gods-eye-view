@@ -135,6 +135,23 @@ See [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 **macOS shortcut:** `./scripts/dev-fresh.sh` clears the Vite cache and pulls any
 configured keys straight from the Keychain. It starts keyless too.
 
+### Omarchy local app
+
+On Omarchy, install a Walker-discoverable desktop entry for the local app:
+
+```bash
+npm run omarchy:check
+npm run omarchy:install
+```
+
+This installs a user-local copy, keeps its server on `127.0.0.1`, and starts it
+on demand through the normal Omarchy web-app launcher. Use
+`gods-eye-view-launch --status` or `gods-eye-view-launch --stop` to inspect or
+stop the local server. The Omarchy packaging pass is an installable alpha and
+still uses the upstream Vite development server; it is not a system package or
+production server. See [`packaging/omarchy/README.md`](packaging/omarchy/README.md)
+for the lifecycle and uninstall details.
+
 ### Then power it up — in the app, not in a file
 
 Keys are upgrades, not prerequisites. When you want one, click the **POWER UP**

@@ -67,6 +67,10 @@ of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md
 
 ### Added
 
+- Add an Omarchy-local installer and Walker desktop launcher. The launcher
+  keeps the provider server loopback-only and manages it as a per-port user
+  service, with status and stop controls.
+
 - Press backtick (`) to toggle a rendered-frame-rate readout beneath the logo.
   Typing fields retain the key; monitoring stops when hidden.
 
