@@ -380,6 +380,22 @@ local environment; browser keys are captured at build time. Rebuild after changi
 a browser key. Preview is for local build verification, not a production server.
 
 
+## Omarchy local app
+
+The first Omarchy packaging pass is an installable, user-local desktop entry
+under `packaging/omarchy/`. It copies the checkout into the user's data
+directory, registers the existing logo and a Walker-discoverable desktop file,
+and starts the app through the normal Omarchy web-app launcher. The launcher
+keeps the Vite server on `127.0.0.1` and uses a per-port user service when a
+user systemd bus is available; it falls back to a state-directory PID and log
+when it is not.
+
+This remains an alpha integration boundary, not a distributable Arch package
+or production server. Provider routes and development-only Provider Settings
+are intentionally preserved, and source `.env` files are not copied during
+installation. No Omarchy system files or user configuration are modified.
+
+
 ## CCTV and radio provider modules
 
 CCTV catalog acquisition, source normalization and frame/media delivery now live
@@ -2136,8 +2152,8 @@ This is the current runtime/source-of-truth snapshot for the project.
 >   OSM stack, ground-floor system with rendered-mesh sampling, always-visible
 >   sprites/trails, OpenSky credit governor). The 2026-07-08 CHANGELOG entry
 >   records the subsystem's architecture, invariants, residuals, and verification.
-> - **Height-datum test surface:** `npm test` 184 unit · `npm run
->   test:track` 43 tracking invariants · headless QA harnesses under
+> - **Height-datum test surface:** the `npm test` unit suite · the `npm run
+>   test:track` tracking regression suite · headless QA harnesses under
 >   `scripts/qa-*.mjs` incl. `qa-height-datum.mjs` (numeric heights) and
 >   `qa-floor-verify.mjs` (any-airport ground-truth oracle).
 > - **2026-08-19 — display-time ground floor (flights layer).** A grounded
@@ -3251,7 +3267,10 @@ Replay transport uses one Play/Pause toggle plus Cancel. During ascent only the 
 - `tools/streetview-headings.mjs`: heading sweep capture; supports neighbor traversal.
 - `tools/pano-pinhole.mjs`: equirectangular-to-pinhole reprojection.
 - `tools/sat-ortho.mjs`: Map Tiles ortho stitch and centered crop with georef corners.
-- `scripts/track-regression.mjs`: headless real-app regression harness for aircraft tracking/model/detection invariants (`npm run test:track`).
+- `scripts/track-regression.mjs`: headless real-app regression harness for
+  aircraft tracking/model/detection invariants (`npm run test:track`). It
+  prefers pinned Chrome-for-Testing and recognizes installed Linux
+  Chrome/Chromium when the pinned browser is unavailable.
 - `scripts/qa-map-source-tray.mjs`: browser proof for the four-source Map Source
   tray — presentation, keyboard disclosure, responsive bounds, unpinned
   auto-dismiss, ACQUIRING status, and retired/unknown stack-id restore

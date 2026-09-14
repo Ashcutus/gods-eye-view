@@ -1,0 +1,298 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP_NAME="God's Eye View"
+DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
+APP_ROOT="${GEV_APP_ROOT:-$DATA_HOME/gods-eye-view}"
+STATE_DIR="${GEV_STATE_DIR:-$STATE_HOME/gods-eye-view}"
+PORT="${GEV_PORT:-4173}"
+UNIT_NAME="${GEV_UNIT_NAME:-gods-eye-view-${PORT}.service}"
+URL="http://127.0.0.1:${PORT}/"
+PID_FILE="$STATE_DIR/server.pid"
+LOG_FILE="$STATE_DIR/server.log"
+LOCK_FILE="$STATE_DIR/launcher.lock"
+SYSTEMD_EXPECTED=0
+
+usage() {
+  cat <<'EOF'
+Usage: gods-eye-view-launch [--status|--stop|--help]
+
+Starts the local God's Eye View server and opens it as an Omarchy web app.
+GEV_APP_ROOT, GEV_PORT, GEV_STATE_DIR, and GEV_UNIT_NAME may be set for development.
+EOF
+}
+
+validate_port() {
+  if [[ ! "$PORT" =~ ^[0-9]+$ ]] || ((PORT < 1 || PORT > 65535)); then
+    echo "Invalid GEV_PORT: $PORT" >&2
+    exit 2
+  fi
+}
+
+pid_value() {
+  [[ -s "$PID_FILE" ]] || return 1
+  local pid
+  pid="$(<"$PID_FILE")"
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  printf '%s\n' "$pid"
+}
+
+process_is_ours() {
+  local pid="$1"
+  local cwd
+  cwd="$(readlink -f "/proc/$pid/cwd" 2>/dev/null || true)"
+  [[ "$cwd" == "$(readlink -f "$APP_ROOT")" ]]
+}
+
+server_pid_is_live() {
+  local pid
+  pid="$(pid_value 2>/dev/null || true)"
+  [[ -n "$pid" ]] || return 1
+  kill -0 "$pid" 2>/dev/null && process_is_ours "$pid"
+}
+
+systemd_available() {
+  command -v systemd-run >/dev/null 2>&1 && command -v systemctl >/dev/null 2>&1
+}
+
+systemd_state() {
+  systemctl --user show "$UNIT_NAME" --property=ActiveState --value 2>/dev/null || true
+}
+
+systemd_unit_is_alive() {
+  case "$(systemd_state)" in
+    active|activating|reloading)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+acquire_launcher_lock() {
+  mkdir -p -- "$STATE_DIR"
+  if command -v flock >/dev/null 2>&1; then
+    exec {LOCK_FD}>"$LOCK_FILE"
+    flock --exclusive "$LOCK_FD"
+  fi
+}
+
+release_launcher_lock() {
+  if [[ -n "${LOCK_FD:-}" ]]; then
+    flock --unlock "$LOCK_FD" 2>/dev/null || true
+    exec {LOCK_FD}>&-
+    unset LOCK_FD
+  fi
+}
+
+server_is_live() {
+  if [[ "$SYSTEMD_EXPECTED" == 1 ]]; then
+    case "$(systemd_state)" in
+      ""|active|activating|reloading)
+        return 0
+        ;;
+      *)
+        return 1
+        ;;
+    esac
+  fi
+  server_pid_is_live
+}
+
+page_is_healthy() {
+  command -v curl >/dev/null 2>&1 || return 1
+  curl --silent --show-error --fail --max-time 2 "$URL" 2>/dev/null \
+    | grep --fixed-strings --quiet "<title>God's Eye View</title>"
+}
+
+require_app() {
+  if [[ ! -f "$APP_ROOT/package.json" ]]; then
+    echo "God's Eye View is not installed at $APP_ROOT" >&2
+    echo "Run: npm run omarchy:install" >&2
+    exit 1
+  fi
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "npm is not on PATH. On Omarchy, install it with: omarchy install dev-env node" >&2
+    exit 1
+  fi
+  if ! command -v curl >/dev/null 2>&1; then
+    echo "curl is required to verify the local server before opening it." >&2
+    exit 1
+  fi
+  if [[ ! -x "$APP_ROOT/node_modules/.bin/vite" ]]; then
+    echo "Dependencies are missing in $APP_ROOT" >&2
+    echo "Run: (cd \"$APP_ROOT\" && PUPPETEER_SKIP_DOWNLOAD=1 npm ci)" >&2
+    exit 1
+  fi
+}
+
+show_recent_logs() {
+  if [[ "$SYSTEMD_EXPECTED" == 1 ]] && command -v journalctl >/dev/null 2>&1; then
+    journalctl --user-unit="$UNIT_NAME" --no-pager --lines=40 >&2 || true
+  elif [[ -f "$LOG_FILE" ]]; then
+    tail --lines=40 "$LOG_FILE" >&2
+  fi
+}
+
+wait_for_server() {
+  local attempt
+  for attempt in {1..60}; do
+    if page_is_healthy; then
+      return 0
+    fi
+    if ! server_is_live; then
+      echo "God's Eye View server stopped before it became ready." >&2
+      show_recent_logs
+      rm -f -- "$PID_FILE"
+      return 1
+    fi
+    sleep 0.25
+  done
+  echo "Timed out waiting for God's Eye View at $URL" >&2
+  show_recent_logs
+  return 1
+}
+
+start_fallback_server() {
+  mkdir -p -- "$STATE_DIR"
+  if command -v setsid >/dev/null 2>&1; then
+    setsid bash -c \
+      'cd "$1" && exec env HOST=127.0.0.1 PORT="$2" npm run dev -- --host 127.0.0.1 --port "$2"' \
+      _ "$APP_ROOT" "$PORT" >>"$LOG_FILE" 2>&1 &
+  else
+    (
+      cd "$APP_ROOT"
+      exec env HOST=127.0.0.1 PORT="$PORT" npm run dev -- --host 127.0.0.1 --port "$PORT"
+    ) >>"$LOG_FILE" 2>&1 &
+  fi
+  printf '%s\n' "$!" > "$PID_FILE"
+}
+
+start_server() {
+  acquire_launcher_lock
+
+  if page_is_healthy; then
+    return 0
+  fi
+
+  require_app
+  : > "$LOG_FILE"
+
+  if systemd_available; then
+    if systemd_unit_is_alive; then
+      SYSTEMD_EXPECTED=1
+      wait_for_server
+      return 0
+    fi
+
+    systemctl --user reset-failed "$UNIT_NAME" >/dev/null 2>&1 || true
+    local npm_bin
+    npm_bin="$(command -v npm)"
+    if systemd-run --user \
+      --unit="$UNIT_NAME" \
+      --collect \
+      --no-block \
+      --service-type=exec \
+      --working-directory="$APP_ROOT" \
+      --setenv=HOST=127.0.0.1 \
+      --setenv=PORT="$PORT" \
+      "$npm_bin" run dev -- --host 127.0.0.1 --port "$PORT" \
+      >>"$LOG_FILE" 2>&1; then
+      SYSTEMD_EXPECTED=1
+      wait_for_server
+      return 0
+    fi
+  fi
+
+  SYSTEMD_EXPECTED=0
+  if server_pid_is_live; then
+    wait_for_server
+    return 0
+  fi
+  rm -f -- "$PID_FILE"
+  start_fallback_server
+  wait_for_server
+}
+
+stop_server() {
+  acquire_launcher_lock
+  local stopped=0
+  if systemd_available; then
+    local state
+    state="$(systemd_state)"
+    if [[ -n "$state" && "$state" != inactive && "$state" != failed ]]; then
+      systemctl --user stop "$UNIT_NAME" >/dev/null 2>&1 || true
+      stopped=1
+    fi
+    systemctl --user reset-failed "$UNIT_NAME" >/dev/null 2>&1 || true
+  fi
+
+  local pid
+  pid="$(pid_value 2>/dev/null || true)"
+  if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null && process_is_ours "$pid"; then
+    if ! kill -- "-$pid" 2>/dev/null; then
+      kill "$pid" 2>/dev/null || true
+    fi
+    stopped=1
+  fi
+
+  rm -f -- "$PID_FILE"
+  if ((stopped)); then
+    echo "Stopped God's Eye View server."
+  else
+    echo "God's Eye View server is not running."
+  fi
+}
+
+show_status() {
+  validate_port
+  if page_is_healthy; then
+    echo "running: $URL"
+  else
+    echo "stopped: $URL"
+  fi
+  echo "app: $APP_ROOT"
+  echo "unit: $UNIT_NAME"
+  echo "fallback log: $LOG_FILE"
+}
+
+open_app() {
+  if command -v omarchy-launch-or-focus-webapp >/dev/null 2>&1; then
+    exec omarchy-launch-or-focus-webapp "$APP_NAME" "$URL"
+  elif command -v omarchy-launch-webapp >/dev/null 2>&1; then
+    exec omarchy-launch-webapp "$URL"
+  elif command -v chromium >/dev/null 2>&1; then
+    exec chromium --app="$URL"
+  elif command -v google-chrome >/dev/null 2>&1; then
+    exec google-chrome --app="$URL"
+  elif command -v xdg-open >/dev/null 2>&1; then
+    exec xdg-open "$URL"
+  else
+    echo "Server is ready at $URL, but no compatible browser launcher was found." >&2
+    exit 1
+  fi
+}
+
+validate_port
+case "${1:-}" in
+  "")
+    start_server
+    release_launcher_lock
+    open_app
+    ;;
+  --status)
+    show_status
+    ;;
+  --stop)
+    stop_server
+    ;;
+  --help|-h)
+    usage
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac

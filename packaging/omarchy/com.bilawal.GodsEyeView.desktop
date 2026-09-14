@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=God's Eye View
+GenericName=Spatial Intelligence Globe
+Comment=Local-first live spatial intelligence globe
+Exec=gods-eye-view-launch
+TryExec=gods-eye-view-launch
+Icon=com.bilawal.GodsEyeView
+Terminal=false
+StartupNotify=true
+Categories=Science;
+Keywords=globe;maps;aircraft;ships;satellites;earth;

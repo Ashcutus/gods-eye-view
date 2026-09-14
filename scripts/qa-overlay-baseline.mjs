@@ -22,7 +22,24 @@ import os from 'node:os';
 import path from 'node:path';
 import puppeteer from 'puppeteer';
 
-const CHROME_EXECUTABLE = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const CHROME_EXECUTABLE_CANDIDATES = [
+  process.env.PUPPETEER_EXECUTABLE_PATH,
+  // Prefer Puppeteer's pinned Chrome-for-Testing, then use the browser paths
+  // supplied by standard macOS and Linux desktop installations.
+  await puppeteer.executablePath().catch(() => null),
+  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  '/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary',
+  '/Applications/Chromium.app/Contents/MacOS/Chromium',
+  '/usr/bin/google-chrome-stable',
+  '/usr/bin/google-chrome',
+  '/usr/bin/chromium',
+  '/usr/bin/chromium-browser',
+  '/usr/lib/chromium/chromium',
+  '/opt/google/chrome/chrome',
+].filter(Boolean);
+const CHROME_EXECUTABLE = CHROME_EXECUTABLE_CANDIDATES.find((candidate) => {
+  try { return fs.existsSync(candidate); } catch { return false; }
+}) || null;
 const DEFAULT_URL = 'http://localhost:4176';
 const VIEWPORT = Object.freeze({ width: 1440, height: 900 });
 const SAMPLE_MS = 5_000;

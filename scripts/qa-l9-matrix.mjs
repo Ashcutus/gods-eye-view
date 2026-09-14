@@ -62,6 +62,35 @@ const JSON_OUT = getOpt('--json', null);
 const ONLY = (getOpt('--only', '') || '').split(',').map((s) => s.trim()).filter(Boolean);
 const SKIP_IDS = (getOpt('--skip', '') || '').split(',').map((s) => s.trim()).filter(Boolean);
 
+const CHROME_EXECUTABLE_CANDIDATES = [
+  process.env.PUPPETEER_EXECUTABLE_PATH,
+  // Prefer Puppeteer's pinned Chrome-for-Testing when it is installed; the
+  // software-GL QA budget is calibrated against that browser. Omarchy and
+  // other Linux desktops commonly provide only a system browser, so keep the
+  // standard Chrome/Chromium locations as a portable fallback.
+  await puppeteer.executablePath().catch(() => null),
+  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  '/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary',
+  '/Applications/Chromium.app/Contents/MacOS/Chromium',
+  '/usr/bin/google-chrome-stable',
+  '/usr/bin/google-chrome',
+  '/usr/bin/chromium',
+  '/usr/bin/chromium-browser',
+  '/usr/lib/chromium/chromium',
+  '/opt/google/chrome/chrome',
+].filter(Boolean);
+
+function findChromeExecutable() {
+  return CHROME_EXECUTABLE_CANDIDATES.find((candidate) => {
+    try { return existsSync(candidate); } catch { return false; }
+  }) || null;
+}
+
+const CHROME_EXECUTABLE = findChromeExecutable();
+if (CHROME_EXECUTABLE && !process.env.PUPPETEER_EXECUTABLE_PATH) {
+  process.env.PUPPETEER_EXECUTABLE_PATH = CHROME_EXECUTABLE;
+}
+
 // ── THE GOVERNING PRINCIPLE ───────────────────────────────────────────────
 //
 //   FAIL means the product is wrong. ENV/SKIP must be POSITIVELY identified,
@@ -1205,7 +1234,7 @@ async function runBrowserGroup(record) {
   const emit = (id, res, ms) => { if (ids.includes(id)) record(CHECKS.find((c) => c.id === id), res, ms); };
   const only = (id) => ids.includes(id);
 
-  const exe = await puppeteer.executablePath().catch(() => null);
+  const exe = CHROME_EXECUTABLE;
   const browser = await puppeteer.launch({
     headless: HEADFUL ? false : 'new',
     ...(exe ? { executablePath: exe } : {}),
